@@ -1,19 +1,18 @@
-extern crate regex;
+extern crate config;
 extern crate redis;
 
 use std::env;
 use std::thread;
 use std::collections::HashMap;
-use regex::Regex;
-use redis::{PubSubCommands, ControlFlow, IntoConnectionInfo};
+use config::{Config, File, Environment};
+use redis::{PubSubCommands, ControlFlow};
 
 const APP_NAME: &'static str = env!("CARGO_PKG_NAME");
 const APP_VER: &'static str = env!("CARGO_PKG_VERSION");
 
-fn monitor_all(host_name: &String, r_client: &redis::Client) -> thread::JoinHandle<()> {
-  print!("monitor_all connecting to '{}'...", host_name);
-  let mut conn = r_client.get_connection()
-    .expect("redis::Client::get_connection()");
+fn monitor_all(r_client: &redis::Client) -> thread::JoinHandle<()> {
+  print!("monitor_all connecting...");
+  let mut conn = r_client.get_connection().expect("get_connection()");
   println!("success.");
 
   thread::spawn(move || {
@@ -33,53 +32,47 @@ fn monitor_all(host_name: &String, r_client: &redis::Client) -> thread::JoinHand
   })
 }
 
-fn watch_devices(host_name: &String, r_client: &redis::Client) -> thread::JoinHandle<()> {
-  print!("watch_devices connecting to '{}'...", host_name);
-  let mut conn = r_client.get_connection()
-    .expect("redis::Client::get_connection()");
+fn watch_devices(r_client: &redis::Client, watch: Vec<String>) -> thread::JoinHandle<()> {
+  print!("watch_devices connecting...");
+  let mut conn = r_client.get_connection().expect("get_connection()");
   println!("success.");
 
   thread::spawn(move || {
-    println!("nothing yet!");
+    if watch.len() > 0 {
+      println!("NEED TO WATCH <{:?}>", watch);
+    }
   })
 }
 
 fn main() {
   println!("{} v{} starting...", APP_NAME, APP_VER);
-  let connect_url: String;
-  let host_name: String;
 
-  match env::var("REDIS_URL") {
-    Ok(r_url) => {
-      let filter_re = Regex::new(r"redis://(?:(?:.*?:)?.*@)?([^/]+)(?:/\d+)?")
-        .expect("Bad redis URL filter regex");
-      let caps = filter_re.captures(&r_url)
-        .expect("captures() failed");
-      if caps.len() < 2 {
-        panic!("Badly-formatted redis URL '{}'", r_url);
-      }
-      connect_url = r_url.clone();
-      host_name = caps[1].to_string();
-    },
-    Err(_e) => {
-      panic!("'REDIS_URL' is not defined in the environment");
-    }
-  }
+  let mut settings = Config::default();
+  settings
+    .merge(File::with_name("config/default").required(false)).unwrap()
+    .merge(File::with_name("config/local").required(false)).unwrap()
+    .merge(Environment::default().separator("_").prefix(APP_NAME)).unwrap();
 
-  let r_conn: redis::Client;
-  match connect_url.into_connection_info() {
-    Ok(c_info) => {
-      r_conn = redis::Client::open(c_info)
-        .expect("redis::Client::open()");
-    },
-    Err(e) => {
-      panic!("Bad connection information: {}", e);
+  let r_host = settings.get_str("redis.host").expect("redis.host");
+  println!("using redis host {}", r_host);
+
+  let r_conn_info = redis::ConnectionInfo {
+    addr: Box::new(redis::ConnectionAddr::Tcp(
+      r_host, 
+      settings.get::<u16>("redis.port").unwrap_or(6379))
+    ),
+    db: 0, 
+    passwd: match settings.get_str("redis.password") {
+      Ok(pass) => Some(pass),
+      Err(_) => None
     }
-  }
+  };
+  
+  let r_conn = redis::Client::open(r_conn_info).expect("redis::Client::open()");
 
   for jh in vec![
-    monitor_all(&host_name, &r_conn), 
-    watch_devices(&host_name, &r_conn)
+    monitor_all(&r_conn), 
+    watch_devices(&r_conn, settings.get::<Vec<String>>("redis.watch").unwrap_or(vec![]))
   ] {
     jh.join().expect("join");
   }
