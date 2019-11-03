@@ -1,0 +1,14 @@
+{
+  "redis": {
+    "host": "newcharlie",
+    "watch": {
+      "patterns": [
+        "rpjios.checkin.*",
+        "*:heartbeat"
+      ]
+    }
+  },
+  "monitor": {
+    "verbose": false
+  }
+}

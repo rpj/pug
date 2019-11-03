@@ -1,6 +1,6 @@
 [package]
 name = "pug"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Ryan Joseph <ryan.joseph@gmail.com>"]
 edition = "2018"
 
